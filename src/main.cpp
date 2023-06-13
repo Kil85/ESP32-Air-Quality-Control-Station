@@ -13,14 +13,16 @@
 #define NO_DUST_VOLTAGE 400 // mv
 #define SYS_VOLTAGE 5000
 
-const int redPin = 9;    // Pin podłączony do pinu czerwonej diody LED
-const int greenPin = 10; // Pin podłączony do pinu zielonej diody LED
-const int bluePin = 11;  // Pin podłączony do pinu niebieskiej diody LED
+const int redPin = 9;    // Pin connected to the red diode
+const int greenPin = 10; // Pin connected to the green diode
+const int bluePin = 11;  // Pin connected to the blue diode
 
 DHT_Unified dht(DHTPIN, DHTTYPE);
 
 uint32_t delayMS = 500;
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
+
+/*Flags*/
 bool isUpperPrinted = 0;
 bool isLowerPrinted = false;
 bool isDustOnTop = false;
@@ -33,15 +35,15 @@ float prevHum = 0.0;
 const int iled = 7; // drive the led of sensor
 const int vout = 0; // analog input
 
-unsigned long lastDebounceTime = 0; // Czas ostatniego odczytu przycisku
+unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;
-
 
 float density, voltage;
 int adcvalue;
 
 //===========================================================================================
 
+/*Sets color on dide RGB*/
 void RGB(const float &value)
 {
   int red, blue, green;
@@ -63,6 +65,7 @@ void RGB(const float &value)
   analogWrite(bluePin, blue);
 }
 
+/*The text scrolling function on the LCD display*/
 void scrollText(const String &text)
 {
   static byte position = 0;
@@ -82,19 +85,21 @@ void scrollText(const String &text)
   lcd.display();
 }
 
+/*Dust value printing function*/
 void printDust(const String &text)
 {
   static unsigned long previousMillis = 0;
   unsigned long currentMillis = millis();
-  unsigned long interval = 750; // Interwał czasowy między przesunięciami (ms)
+  unsigned long interval = 750; // Time interval between scrolling
 
   if (currentMillis - previousMillis >= interval)
   {
     previousMillis = currentMillis;
-    scrollText(text); // Wywołanie funkcji przesuwającej tekst
+    scrollText(text);
   }
 }
 
+/*Printing air quality*/
 void printInterval(const String interval)
 {
   lcd.setCursor(0, 1);
@@ -105,6 +110,7 @@ void printInterval(const String interval)
   Serial.println(interval);
 }
 
+/*Setting air quality*/
 void setDustInterval(const float &val)
 {
   if (val > 0 && val < 36)
@@ -165,6 +171,7 @@ void setDustInterval(const float &val)
   }
 }
 
+/*Filtering dust sensor readings*/
 int Filter(int m)
 {
   static int flag_first = 0, _buff[10], sum;
@@ -196,6 +203,7 @@ int Filter(int m)
   }
 }
 
+/*Reading dust value from sensor*/
 float dustSensor()
 {
   digitalWrite(iled, HIGH);
@@ -219,6 +227,7 @@ float dustSensor()
   return density;
 }
 
+/*Function called when dust value is printed on display*/
 void DustOnTop()
 {
   float dustValue = dustSensor();
@@ -230,12 +239,14 @@ void DustOnTop()
   printDust(textToPrint);
 }
 
+/*Function called when dust value is not printed on display*/
 void DustOnBottom()
 {
   float dustValue = dustSensor();
   RGB(dustValue);
 }
 
+/*Clearing display and setting flags*/
 void clearDust()
 {
   lcd.clear();
@@ -246,6 +257,7 @@ void clearDust()
 
 //===========================================================================================
 
+/*Function called when temperature value is printed on display*/
 void TempOnTop()
 {
   sensors_event_t event;
@@ -295,6 +307,7 @@ void TempOnTop()
   }
 }
 
+/*Clearing display and setting flags*/
 void clearTemp()
 {
   lcd.clear();
@@ -306,6 +319,7 @@ void clearTemp()
 
 //===========================================================================================
 
+/*Interruption function*/
 void buttonInterrupt()
 {
   unsigned long currentMillis = millis();
