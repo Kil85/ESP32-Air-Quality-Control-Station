@@ -8,6 +8,7 @@
 
 #define DHTPIN 2 // Digital pin connected to the DHT sensor
 #define buttonPin 3
+#define buzzerPin 4
 #define DHTTYPE DHT11       // DHT 11
 #define COV_RATIO 0.2       // ug/mmm / mv
 #define NO_DUST_VOLTAGE 400 // mv
@@ -42,6 +43,17 @@ float density, voltage;
 int adcvalue;
 
 //===========================================================================================
+
+/*Function responsible for buzzer*/
+void Buzzer(const float &value)
+{
+  if (value > 500)
+  {
+    digitalWrite(buzzerPin, HIGH);
+  }
+  else
+    digitalWrite(buzzerPin, LOW);
+}
 
 /*Sets color on dide RGB*/
 void RGB(const float &value)
@@ -236,6 +248,7 @@ void DustOnTop()
 
   setDustInterval(dustValue);
   RGB(dustValue);
+  Buzzer(dustValue);
   printDust(textToPrint);
 }
 
@@ -244,6 +257,7 @@ void DustOnBottom()
 {
   float dustValue = dustSensor();
   RGB(dustValue);
+  Buzzer(dustValue);
 }
 
 /*Clearing display and setting flags*/
@@ -347,6 +361,7 @@ void setup()
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
 }
 
 void loop()
