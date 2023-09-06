@@ -37,7 +37,7 @@ std::vector<MeasurePtr> vector;
 MeasurePtr averageMeasure;
 
 unsigned long lastTime = 0;
-unsigned long timerDelay = 6000;
+unsigned long timerDelay = 60000;
 
 DHT_Unified dht(DHTPIN, DHTTYPE);
 
@@ -412,67 +412,46 @@ void getAverageMeasure(std::vector<MeasurePtr> vector)
 
 void sendMeasureToDatabase(void *pvParameters)
 {
-  Serial.println("DUPA");
   std::vector<MeasurePtr> *vectorPtr = static_cast<std::vector<MeasurePtr> *>(pvParameters);
   std::vector<MeasurePtr> &vector = *vectorPtr;
   connectToWifi();
   getAverageMeasure(vector);
-  // MeasurePtr *measurePtr = static_cast<MeasurePtr *>(pvParameters);
-  // MeasurePtr &measure = *measurePtr;
-  Serial.println("2");
 
   postPayload = postPayload + "\"Temperature\":" + averageMeasure.get()->Temperature + ", \"Humidity\" :" + averageMeasure.get()->Humidity + ",\" pressure \":" + averageMeasure.get()->Dust + "}";
 
-  http.begin(serverURL); // Rozpocznij sesję HTTP z określonym adresem URL
-  Serial.println("3");
-
-  // Ustaw nagłówki HTTP
+  http.begin(serverURL);
   http.addHeader("Content-Type", "application/json");
 
   int httpResponseCode = http.POST(postPayload);
   Serial.println(postPayload);
-  Serial.println("4");
 
   if (httpResponseCode > 0)
   {
-    Serial.print("Odpowiedź serwera: ");
     Serial.println(httpResponseCode);
     String payload = http.getString();
-    Serial.println("Odpowiedź serwera: " + payload);
-    Serial.println("5");
   }
   else
   {
-    Serial.print("Błąd odpowiedzi serwera: ");
     Serial.println(httpResponseCode);
-    Serial.println("6");
   }
 
-  // Zamknij sesję HTTP
   http.end();
   lastTime = millis();
   postPayload = payloadTemplate;
   isSending = 0;
-  WiFi.disconnect(); 
+  WiFi.disconnect();
   vTaskDelete(NULL);
-  Serial.println("7");
 }
-// std::vector<MeasurePtr> vector
-
-// Dane do wysłania w formie JSON
 
 void setup()
 {
-
   Serial.begin(9600);
-  Serial.println("1");
   dht.begin();
   lcd.init();
   lcd.backlight();
   Wire.begin();
   lcd.clear();
   attachInterrupt(digitalPinToInterrupt(buttonPin), buttonInterrupt, FALLING);
-  Serial.println("2");
 
   pinMode(buttonPin, INPUT_PULLUP);
   pinMode(iled, OUTPUT);
@@ -483,14 +462,10 @@ void setup()
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
-  Serial.println("3");
-
-  
 }
 
 void loop()
 {
-
   delay(1000);
   float temp, hum, dust;
 
@@ -509,18 +484,11 @@ void loop()
   }
 
   vector.push_back(std::make_shared<Measure>(prevTemp, prevHum, density));
-  // Serial.println(prevTemp);
-  // Serial.println(prevHum);
-  // Serial.println(density);
-  // Serial.println("==================================================");
 
   if ((millis() - lastTime) > timerDelay)
   {
     if (!isSending)
     {
-      
-      // averageMeasure = std::make_shared<Measure>(temp, hum, dust);
-      // xTaskCreate(getAverageMeasure, "Average", 10000, &vector, 0, &AverageTask);
       xTaskCreate(sendMeasureToDatabase, "SendToDataBase", 10000, &vector, 0, &SendTask);
       isSending = 1;
     }
