@@ -5,18 +5,39 @@
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <vector>
+#include "Measure.h"
 
-#define DHTPIN 2 // Digital pin connected to the DHT sensor
-#define buttonPin 3
-#define buzzerPin 4
+#define DHTPIN 13 // Digital pin connected to the DHT sensor
+#define buttonPin 4
+#define buzzerPin 18
 #define DHTTYPE DHT11       // DHT 11
-#define COV_RATIO 0.2       // ug/mmm / mv
-#define NO_DUST_VOLTAGE 400 // mv
-#define SYS_VOLTAGE 5000
+#define COV_RATIO 0.1       // ug/mmm / mv
+#define NO_DUST_VOLTAGE 200 // mv
+#define SYS_VOLTAGE 3300
 
-const int redPin = 9;    // Pin connected to the red diode
-const int greenPin = 10; // Pin connected to the green diode
-const int bluePin = 11;  // Pin connected to the blue diode
+const int redPin = 12;   // Pin connected to the red diode
+const int greenPin = 14; // Pin connected to the green diode
+const int bluePin = 27;  // Pin connected to the blue diode
+
+const char *ssid = "Kamil";
+const char *password = "rijp1020";
+const char *serverURL = "https://weathermeasure.azurewebsites.net/api/measurment";
+String postPayload = "{\"DeviceName\":\"ESP2\",";
+String payloadTemplate = "{\"DeviceName\":\"ESP2\",";
+
+HTTPClient http;
+TaskHandle_t AverageTask;
+TaskHandle_t SendTask;
+
+using MeasurePtr = std::shared_ptr<Measure>;
+std::vector<MeasurePtr> vector;
+MeasurePtr averageMeasure;
+
+unsigned long lastTime = 0;
+unsigned long timerDelay = 6000;
 
 DHT_Unified dht(DHTPIN, DHTTYPE);
 
@@ -29,12 +50,13 @@ bool isLowerPrinted = false;
 bool isDustOnTop = false;
 bool isTempCleared = 0;
 bool isDustCleared = 0;
+bool isSending = 0;
 int currentQuality = -1;
 float prevTemp = 0.0;
 float prevHum = 0.0;
 
-const int iled = 7; // drive the led of sensor
-const int vout = 0; // analog input
+const int iled = 33; // drive the led of sensor
+const int vout = 32; // analog input
 
 unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;
@@ -125,7 +147,7 @@ void printInterval(const String interval)
 /*Setting air quality*/
 void setDustInterval(const float &val)
 {
-  if (val > 0 && val < 36)
+  if (val >= 0 && val < 36)
   {
     if (currentQuality != 0)
     {
@@ -186,8 +208,8 @@ void setDustInterval(const float &val)
 /*Filtering dust sensor readings*/
 int Filter(int m)
 {
-  static int flag_first = 0, _buff[10], sum;
-  const int _buff_max = 10;
+  static int flag_first = 0, _buff[12], sum;
+  const int _buff_max = 12;
   int i;
 
   if (flag_first == 0)
@@ -207,8 +229,8 @@ int Filter(int m)
     {
       _buff[i] = _buff[i + 1];
     }
-    _buff[9] = m;
-    sum += _buff[9];
+    _buff[11] = m;
+    sum += _buff[11];
 
     i = sum / 10.0;
     return i;
@@ -234,13 +256,13 @@ float dustSensor()
     density = voltage * COV_RATIO;
   }
   else
-    density = 0;
+    density = 26.8;
 
   return density;
 }
 
 /*Function called when dust value is printed on display*/
-void DustOnTop()
+void DustOnTop(float &dust)
 {
   float dustValue = dustSensor();
 
@@ -250,14 +272,16 @@ void DustOnTop()
   RGB(dustValue);
   Buzzer(dustValue);
   printDust(textToPrint);
+  dust = dustValue;
 }
 
 /*Function called when dust value is not printed on display*/
-void DustOnBottom()
+void DustOnBottom(float &dust)
 {
   float dustValue = dustSensor();
   RGB(dustValue);
   Buzzer(dustValue);
+  dust = dustValue;
 }
 
 /*Clearing display and setting flags*/
@@ -272,7 +296,7 @@ void clearDust()
 //===========================================================================================
 
 /*Function called when temperature value is printed on display*/
-void TempOnTop()
+void TempOnTop(float &temp, float &hum)
 {
   sensors_event_t event;
   dht.temperature().getEvent(&event);
@@ -296,6 +320,7 @@ void TempOnTop()
     lcd.print(F("\xDF"));
     lcd.print(F("C"));
     lcd.display();
+    temp = prevTemp;
   }
 
   dht.humidity().getEvent(&event);
@@ -318,6 +343,7 @@ void TempOnTop()
     lcd.print(prevHum);
     lcd.print(F("%"));
     lcd.display();
+    hum = prevHum;
   }
 }
 
@@ -344,41 +370,159 @@ void buttonInterrupt()
   }
 }
 
+void connectToWifi()
+{
+
+  WiFi.mode(WIFI_STA); // Optional
+  WiFi.begin(ssid, password);
+  Serial.println("\nConnecting");
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(100);
+  }
+
+  Serial.println("\nConnected to the WiFi network");
+  Serial.print("Local ESP32 IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void getAverageMeasure(std::vector<MeasurePtr> vector)
+{
+  if (vector.empty())
+  {
+    averageMeasure = std::make_shared<Measure>(0.0f, 0.0f, 0.0f);
+  }
+  float tmpTemp = 0.0f;
+  float tmpHumi = 0.0f;
+  float tmpDust = 0.0f;
+  int i = 0;
+
+  for (auto measure : vector)
+  {
+    tmpTemp += measure.get()->Temperature;
+    tmpHumi += measure.get()->Humidity;
+    tmpDust += measure.get()->Dust;
+    i++;
+  }
+  averageMeasure = std::make_shared<Measure>(tmpTemp / i, tmpHumi / i, tmpDust / i);
+  vector.clear();
+}
+
+void sendMeasureToDatabase(void *pvParameters)
+{
+  Serial.println("DUPA");
+  std::vector<MeasurePtr> *vectorPtr = static_cast<std::vector<MeasurePtr> *>(pvParameters);
+  std::vector<MeasurePtr> &vector = *vectorPtr;
+  connectToWifi();
+  getAverageMeasure(vector);
+  // MeasurePtr *measurePtr = static_cast<MeasurePtr *>(pvParameters);
+  // MeasurePtr &measure = *measurePtr;
+  Serial.println("2");
+
+  postPayload = postPayload + "\"Temperature\":" + averageMeasure.get()->Temperature + ", \"Humidity\" :" + averageMeasure.get()->Humidity + ",\" pressure \":" + averageMeasure.get()->Dust + "}";
+
+  http.begin(serverURL); // Rozpocznij sesję HTTP z określonym adresem URL
+  Serial.println("3");
+
+  // Ustaw nagłówki HTTP
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(postPayload);
+  Serial.println(postPayload);
+  Serial.println("4");
+
+  if (httpResponseCode > 0)
+  {
+    Serial.print("Odpowiedź serwera: ");
+    Serial.println(httpResponseCode);
+    String payload = http.getString();
+    Serial.println("Odpowiedź serwera: " + payload);
+    Serial.println("5");
+  }
+  else
+  {
+    Serial.print("Błąd odpowiedzi serwera: ");
+    Serial.println(httpResponseCode);
+    Serial.println("6");
+  }
+
+  // Zamknij sesję HTTP
+  http.end();
+  lastTime = millis();
+  postPayload = payloadTemplate;
+  isSending = 0;
+  WiFi.disconnect(); 
+  vTaskDelete(NULL);
+  Serial.println("7");
+}
+// std::vector<MeasurePtr> vector
+
+// Dane do wysłania w formie JSON
+
 void setup()
 {
+
   Serial.begin(9600);
+  Serial.println("1");
   dht.begin();
   lcd.init();
   lcd.backlight();
   Wire.begin();
   lcd.clear();
   attachInterrupt(digitalPinToInterrupt(buttonPin), buttonInterrupt, FALLING);
+  Serial.println("2");
 
   pinMode(buttonPin, INPUT_PULLUP);
   pinMode(iled, OUTPUT);
   digitalWrite(iled, LOW);
+  pinMode(vout, INPUT);
 
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
+  Serial.println("3");
+
+  
 }
 
 void loop()
 {
-  delay(delayMS);
+
+  delay(1000);
+  float temp, hum, dust;
 
   if (!isDustOnTop)
   {
     if (!isTempCleared)
       clearTemp();
-    TempOnTop();
-    DustOnBottom();
+    TempOnTop(temp, hum);
+    DustOnBottom(dust);
   }
   else
   {
     if (!isDustCleared)
       clearDust();
-    DustOnTop();
+    DustOnTop(dust);
+  }
+
+  vector.push_back(std::make_shared<Measure>(prevTemp, prevHum, density));
+  // Serial.println(prevTemp);
+  // Serial.println(prevHum);
+  // Serial.println(density);
+  // Serial.println("==================================================");
+
+  if ((millis() - lastTime) > timerDelay)
+  {
+    if (!isSending)
+    {
+      
+      // averageMeasure = std::make_shared<Measure>(temp, hum, dust);
+      // xTaskCreate(getAverageMeasure, "Average", 10000, &vector, 0, &AverageTask);
+      xTaskCreate(sendMeasureToDatabase, "SendToDataBase", 10000, &vector, 0, &SendTask);
+      isSending = 1;
+    }
   }
 }
