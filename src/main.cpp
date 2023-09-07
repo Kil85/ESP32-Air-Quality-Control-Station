@@ -25,8 +25,8 @@ const int bluePin = 27;  // Pin connected to the blue diode
 const char *ssid = "Kamil";
 const char *password = "rijp1020";
 const char *serverURL = "https://weathermeasure.azurewebsites.net/api/measurment";
-String postPayload = "{\"DeviceName\":\"ESP2\",";
-String payloadTemplate = "{\"DeviceName\":\"ESP2\",";
+String postPayload = "{\"DeviceName\":\"ESP32\",";
+String payloadTemplate = "{\"DeviceName\":\"ESP32\",";
 
 HTTPClient http;
 TaskHandle_t AverageTask;
@@ -407,6 +407,7 @@ void getAverageMeasure(std::vector<MeasurePtr> vector)
     i++;
   }
   averageMeasure = std::make_shared<Measure>(tmpTemp / i, tmpHumi / i, tmpDust / i);
+  Serial.println(tmpDust / i);
   vector.clear();
 }
 
@@ -417,7 +418,7 @@ void sendMeasureToDatabase(void *pvParameters)
   connectToWifi();
   getAverageMeasure(vector);
 
-  postPayload = postPayload + "\"Temperature\":" + averageMeasure.get()->Temperature + ", \"Humidity\" :" + averageMeasure.get()->Humidity + ",\" pressure \":" + averageMeasure.get()->Dust + "}";
+  postPayload = postPayload + "\"Temperature\":" + averageMeasure.get()->Temperature + ", \"Humidity\" :" + averageMeasure.get()->Humidity + ",\"dustValue\":" + averageMeasure.get()->Dust + "}";
 
   http.begin(serverURL);
   http.addHeader("Content-Type", "application/json");
@@ -483,6 +484,7 @@ void loop()
     DustOnTop(dust);
   }
 
+  
   vector.push_back(std::make_shared<Measure>(prevTemp, prevHum, density));
 
   if ((millis() - lastTime) > timerDelay)
